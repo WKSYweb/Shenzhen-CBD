@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>SHENZHEN CBD — 福田中心区立体地图</title>
+<meta name="description" content="深圳福田CBD 静态立体地图 · 瓦片流式加载 · OpenStreetMap 数据 · Cloudflare Pages">
+<meta name="theme-color" content="#05070c">
+<link rel="preload" href="./data/manifest.json" as="fetch" crossorigin="anonymous">
+<link rel="modulepreload" href="./vendor/three.module.min.js">
+<link rel="stylesheet" href="./css/style.css">
+<script type="importmap">
+{
+  "imports": {
+    "three": "./vendor/three.module.min.js"
+  }
+}
+</script>
+</head>
+<body>
+
+<canvas id="scene"></canvas>
+
+<!-- ============ 顶栏 ============ -->
+<header class="topbar">
+  <div class="brand">
+    <span class="dot" id="statusDot"></span>
+    <strong>SHENZHEN&nbsp;CBD</strong>
+    <span class="sep">/</span>
+    <span class="muted">福田中心区 · 立体地图</span>
+  </div>
+  <div class="topbar-right">
+    <div class="pill" id="pillState"><span class="k">CITY</span><span class="v" id="cityState">初始化</span></div>
+    <div class="pill"><span class="k">FPS</span><span class="v" id="fps">--</span></div>
+    <div class="pill"><span class="k">TILES</span><span class="v" id="tileCount">0</span></div>
+    <button class="btn ghost" id="btnHelp" title="帮助 / 快捷键">?</button>
+  </div>
+</header>
+
+<!-- ============ 左侧面板 ============ -->
+<aside class="panel panel-left" id="panelLeft">
+  <section class="card">
+    <div class="card-head">
+      <span>坐标 · COORDS</span>
+      <button class="mini" id="btnCopyLink">复制链接</button>
+    </div>
+    <div class="kv"><span>经纬度</span><b id="outLatLon">—</b></div>
+    <div class="kv"><span>本地 X / Z</span><b id="outXZ">—</b></div>
+    <div class="kv"><span>高度</span><b id="outY">—</b></div>
+    <div class="kv"><span>朝向</span><b id="outHeading">N · 000°</b></div>
+    <div class="kv"><span>所在瓦片</span><b id="outTile">—</b></div>
+  </section>
+
+  <section class="card">
+    <div class="card-head">
+      <span>瓦片流 · TILE STREAM</span>
+      <span class="tag" id="streamState">IDLE</span>
+    </div>
+    <div class="minimap-wrap">
+      <canvas id="minimap" width="240" height="240"></canvas>
+    </div>
+    <div class="legend">
+      <i class="sw sw-ready"></i>已就绪
+      <i class="sw sw-load"></i>加载中
+      <i class="sw sw-idle"></i>未加载
+      <i class="sw sw-view"></i>视野
+    </div>
+    <div class="kv"><span>已载入 / 总数</span><b id="outLoaded">0 / 0</b></div>
+    <div class="kv"><span>队列</span><b id="outQueue">0</b></div>
+    <div class="kv"><span>建筑体</span><b id="outBuildings">0</b></div>
+    <div class="kv"><span>数据量</span><b id="outBytes">0 KB</b></div>
+  </section>
+
+  <section class="card">
+    <div class="card-head"><span>渲染 · RENDER</span></div>
+    <label class="row"><span>视距 <em id="valDist">1200</em> m</span>
+      <input type="range" id="rngDist" min="400" max="2400" step="100" value="1200"></label>
+    <label class="row"><span>移动速度 <em id="valSpeed">1.0</em>×</span>
+      <input type="range" id="rngSpeed" min="0.2" max="8" step="0.2" value="1"></label>
+    <label class="row switch"><input type="checkbox" id="chkLabels" checked><span>地标标签</span></label>
+    <label class="row switch"><input type="checkbox" id="chkGrid"><span>瓦片网格</span></label>
+    <label class="row switch"><input type="checkbox" id="chkShadow" checked><span>阴影</span></label>
+    <label class="row switch"><input type="checkbox" id="chkFog" checked><span>大气雾</span></label>
+  </section>
+</aside>
+
+<!-- ============ 右侧面板 ============ -->
+<aside class="panel panel-right" id="panelRight">
+  <section class="card">
+    <div class="card-head"><span>去任何地方 · GO ANYWHERE</span></div>
+    <div class="search">
+      <input type="text" id="inpSearch" placeholder="搜索地标 / 输入 22.5372,114.0503" autocomplete="off">
+      <button class="btn" id="btnGo">GO</button>
+    </div>
+    <ul class="landmarks" id="landmarkList"></ul>
+  </section>
+
+  <section class="card">
+    <div class="card-head"><span>视角 · VIEW</span></div>
+    <div class="btn-grid">
+      <button class="btn" data-mode="walk">行走 V</button>
+      <button class="btn" data-mode="fly">飞行 F</button>
+      <button class="btn" data-mode="orbit">环绕 C</button>
+      <button class="btn" id="btnTop">俯视 T</button>
+    </div>
+    <div class="kv"><span>当前模式</span><b id="outMode">ORBIT</b></div>
+  </section>
+
+  <section class="card collapsible" id="cardDebug">
+    <div class="card-head" id="debugHead"><span>调试 · DEBUG</span><span class="tag">−</span></div>
+    <div class="card-body">
+      <pre id="debugLog">waiting for tile state…</pre>
+      <button class="mini" id="btnCopyDebug">复制调试信息</button>
+    </div>
+  </section>
+</aside>
+
+<!-- ============ 底部 HUD ============ -->
+<footer class="hud">
+  <div class="keys">
+    <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd><span>移动</span>
+    <kbd>Shift</kbd><span>加速</span>
+    <kbd>Space</kbd><span>上升 / 跳</span>
+    <kbd>C</kbd><span>视角</span>
+    <kbd>V</kbd><span>行走</span>
+    <kbd>F</kbd><span>飞行</span>
+    <kbd>L</kbd><span>标签</span>
+    <kbd>R</kbd><span>重置</span>
+  </div>
+  <div class="attrib">
+    数据 <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">© OpenStreetMap contributors</a>
+    · 静态托管于 Cloudflare Pages
+  </div>
+</footer>
+
+<!-- ============ 拾取信息 ============ -->
+<div class="tooltip" id="tooltip" hidden></div>
+<div class="crosshair" id="crosshair" hidden></div>
+
+<!-- ============ 加载门 ============ -->
+<div class="gate" id="gate">
+  <div class="gate-inner">
+    <div class="gate-title">SHENZHEN&nbsp;CBD</div>
+    <div class="gate-sub">福田中心区 · 立体地图</div>
+    <div class="bar"><i id="gateBar"></i></div>
+    <div class="gate-state" id="gateState">正在拉取瓦片清单…</div>
+    <button class="btn primary" id="btnEnter" disabled>进入城市</button>
+    <div class="gate-tip">WASD 移动 · 鼠标拖拽转视角 · 滚轮缩放 · 点击建筑查看信息</div>
+  </div>
+</div>
+
+<!-- ============ 帮助 ============ -->
+<div class="modal" id="modalHelp" hidden>
+  <div class="modal-box">
+    <h3>操作说明</h3>
+    <ul>
+      <li><b>环绕模式</b>：左键拖拽旋转，右键 / 中键平移，滚轮缩放。</li>
+      <li><b>行走 / 飞行模式</b>：点击画面锁定鼠标，WASD 移动，Shift 加速，Esc 退出。</li>
+      <li><b>瓦片流式加载</b>：以相机为中心按 250 m 网格按需拉取 JSON，超出视距自动卸载。</li>
+      <li><b>分享视角</b>：点「复制链接」，URL 会带上经纬度与朝向。</li>
+    </ul>
+    <button class="btn" id="btnCloseHelp">关闭</button>
+  </div>
+</div>
+
+<script type="module" src="./js/main.js"></script>
+</body>
+</html>
